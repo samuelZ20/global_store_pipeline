@@ -1,1 +1,51 @@
+# --- Ambiente e Segurança ---
 .env
+.venv/
+env/
+venv/
+ENV/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Poetry ---
+# Mantemos o poetry.lock e o pyproject.toml, mas ignoramos caches de instalação
+.pytest_cache/
+.cache/
+
+# --- Airflow ---
+# Ignoramos logs e a base de dados local do Airflow para não sujar o repo
+airflow.db
+airflow.cfg
+logs/
+unittests.cfg
+webserver_config.py
+
+# --- IDEs (VS Code / PyCharm) ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Sistema Operacional ---
+.DS_Store
+Thumbs.db
