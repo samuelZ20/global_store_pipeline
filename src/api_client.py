@@ -1,45 +1,47 @@
-import requests
 import os
+import requests
 from datetime import datetime
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
-# carregamos as configurações de segurança do arquivo .env
+
 load_dotenv()
+API_BASE_URL = os.getenv("API_BASE_URL", "https://fakestoreapi.com")
 
-# pegamos a URL da API que você salvou no .env
-API_BASE_URL = os.getenv("API_BASE_URL")
-
-def extrair_dados(endpoint):
+def extrair_dados(endpoint: str) -> Optional[List[Dict]]:
     """
-    Função que conecta na API e busca os dados.
-    Adiciona um timestamp para sabermos quando a extração foi feita (Boas Práticas).
+    Conecta na API e busca os dados, adicionando o timestamp de extração (Camada Bronze).
     """
     url = f"{API_BASE_URL}/{endpoint}"
     
     try:
         print(f"Buscando dados de: {url}...")
-        response = requests.get(url)
         
-        #se a API responder algo diferente de 'sucesso' (200), ele gera um erro aqui
+        # Adicionado timeout de 10 segundos (Boas práticas para Airflow/Produção)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         
         dados = response.json()
         
-        #adicionamos a data da extração em cada item (Conceito de Camada Bronze)
+        # Otimização: Pegamos o timestamp uma única vez fora do loop
         timestamp_atual = datetime.now().isoformat()
+        
         for item in dados:
             item['extraction_timestamp'] = timestamp_atual
             
         return dados
 
-    except Exception as e:
-        print(f"Ocorreu um erro na extração: {e}")
+    except requests.exceptions.RequestException as req_err:
+        # Captura especificamente erros de rede (timeout, conexão, 404, 500)
+        print(f"❌ Erro de rede na extração da API: {req_err}")
+        return None
+    except ValueError as val_err:
+        # Captura erro caso a API retorne algo que não seja um JSON válido
+        print(f"❌ Erro ao converter resposta para JSON: {val_err}")
         return None
 
-#este bloco abaixo só roda se você executar o arquivo diretamente
 if __name__ == "__main__":
     produtos = extrair_dados("products")
     if produtos:
-        print(f"Sucesso! Conseguimos extrair {len(produtos)} produtos.")
-        # Mostra o primeiro produto só para conferirmos
+        print(f"✅ Sucesso! Extraímos {len(produtos)} produtos.")
         print(f"Exemplo de dado: {produtos[0]}")

@@ -1,42 +1,50 @@
-import sys
-import os
-
-# Garante que o Python encontre a pasta src
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
-
-from api_client import extrair_dados
-from transform import transform_products
-from db_manager import get_engine
+from src.api_client import extrair_dados
+from src.transform import transform_products
+from src.db_manager import get_engine
+from src.init_db import create_tables
+from sqlalchemy import text
+import pandas as pd
 
 def run_pipeline():
-    print("🚀 Iniciando Pipeline: Global Store Unified...")
+    print("🚀 Iniciando o pipeline ETL da Global Store...")
 
-    #EXTRAÇÃO (Camada Bronze)
-    print("\n--- Etapa 1: Extração ---")
-    raw_products = extrair_dados("products")
+    # --- ETAPA 0: Setup do Banco ---
+    print("\n[0/3] Configurando o banco de dados...")
+    create_tables()
+
+    # --- ETAPA 1: Extração ---
+    print("\n[1/3] Iniciando Extração (Camada Bronze)...")
+    dados_brutos = extrair_dados("products")
     
-    if not raw_products:
-        print("❌ Falha na extração. Abortando...")
+    if not dados_brutos:
+        print("❌ Falha: Nenhum dado retornado da API.")
         return
 
-    #TRANSFORMAÇÃO (Camada Silver)
-    print("\n--- Etapa 2: Transformação ---")
-    df_products = transform_products(raw_products)
+    # --- ETAPA 2: Transformação ---
+    print("\n[2/3] Iniciando Transformação (Camada Silver)...")
+    df_silver = transform_products(dados_brutos)
+    print(f"✅ Transformação concluída. {len(df_silver)} produtos processados.")
 
-    #CARGA (Database)
-    print("\n--- Etapa 3: Carga no Render ---")
+    # --- ETAPA 3: Carga ---
+    print("\n[3/3] Iniciando Carga no PostgreSQL (Render)...")
     engine = get_engine()
-    
-    if engine and df_products is not None:
+    if engine:
         try:
-            # O Pandas envia o DataFrame direto para o SQL
-            # 'if_exists=replace' cria a tabela automaticamente na primeira vez
-            df_products.to_sql('silver_products', con=engine, if_exists='replace', index=False)
-            print("✅ Dados carregados com sucesso na tabela 'silver_products'!")
+            # Limpa os dados antigos antes de inserir os novos (evita duplicidade do id)
+            with engine.connect() as conn:
+                conn.execute(text("TRUNCATE TABLE silver_products;"))
+                conn.commit()
+            
+            # Insere os dados usando 'append' para respeitar a tabela que o init_db criou
+            df_silver.to_sql('silver_products', con=engine, if_exists='append', index=False)
+            print("✅ Carga finalizada com sucesso! Dados inseridos no Render.")
+            
         except Exception as e:
-            print(f"❌ Erro ao carregar dados: {e}")
+            print(f"❌ Erro durante a carga no banco: {e}")
     else:
-        print("❌ Falha na conexão com o banco de dados.")
+        print("❌ Erro: Engine do banco não configurada.")
+
+    print("\n🎉 Pipeline End-to-End executado com sucesso!")
 
 if __name__ == "__main__":
     run_pipeline()

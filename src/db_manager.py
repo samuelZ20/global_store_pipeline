@@ -1,21 +1,37 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.engine.url import URL
+from sqlalchemy.exc import SQLAlchemyError
+from typing import Optional
 
 # Carrega as credenciais do .env
 load_dotenv()
 
-def get_engine():
-    """Cria a conexão com o banco de dados no Render usando as variáveis do .env"""
+def get_engine() -> Optional[Engine]:
+    """
+    Cria a conexão com o banco de dados no Render usando URL segura.
+    Retorna a engine do SQLAlchemy ou None em caso de falha.
+    """
     user = os.getenv("DB_USER")
     password = os.getenv("DB_PASSWORD")
     host = os.getenv("DB_HOST")
     db_name = os.getenv("DB_NAME")
     
-    # URL de conexão para PostgreSQL
-    connection_url = f"postgresql://{user}:{password}@{host}/{db_name}"
+    # Validação Fail-Fast: Verifica se esqueceu alguma variável no .env
+    if not all([user, password, host, db_name]):
+        print("❌ Erro: Faltam variáveis de ambiente no .env para o banco de dados.")
+        return None
+    
+    # Construção segura da URL (Trata senhas com caracteres especiais como @, /, #)
+    connection_url = URL.create(
+        drivername="postgresql",
+        username=user,
+        password=password,
+        host=host,
+        database=db_name
+    )
     
     try:
         engine = create_engine(connection_url)
@@ -27,9 +43,12 @@ def get_engine():
         print(f"❌ Erro ao conectar ao banco de dados: {e}")
         return None
 
+def create_tables(engine: Engine) -> None:
+    """Cria a tabela silver_products explicitamente se ela não existir."""
+    if not engine:
+        print("❌ Erro: Engine inválida fornecida para criação de tabelas.")
+        return
 
-def create_tables(engine):
-    """Cria a tabela explicitamente se ela não existir."""
     query = """
     CREATE TABLE IF NOT EXISTS silver_products (
         id INT PRIMARY KEY,
@@ -42,8 +61,16 @@ def create_tables(engine):
         extraction_timestamp TIMESTAMP
     );
     """
-    with engine.connect() as conn:
-        conn.execute(text(query))
-        conn.commit()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(query))
+            conn.commit()
+            print("✅ Sucesso: Estrutura da tabela validada no banco de dados!")
+    except SQLAlchemyError as e:
+        print(f"❌ Erro ao criar/validar tabela: {e}")
+
 if __name__ == "__main__":
-    get_engine()
+    # Teste de execução direta
+    test_engine = get_engine()
+    if test_engine:
+        create_tables(test_engine)

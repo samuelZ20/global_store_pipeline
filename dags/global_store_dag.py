@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 import pandas as pd
+from sqlalchemy import text
 
 # Garante que o Airflow encontre a pasta 'src' para importar seus módulos locais
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -11,8 +12,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src'
 from api_client import extrair_dados
 from transform import transform_products
 from db_manager import get_engine
+from init_db import create_tables # <-- Novo import!
 
-# 1. Configurações básicas da DAG (Default Args)
 default_args = {
     'owner': 'Samuel Frizzone',
     'depends_on_past': False,
@@ -21,18 +22,26 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-# 2. Definição da DAG
 with DAG(
     'global_store_multi_task_pipeline',
     default_args=default_args,
-    description='Pipeline ETL Modular para a Global Store - Samuel Frizzone (UFLA)',
-    schedule='@daily', 
+    description='Pipeline ETL Modular para a Global Store',
+    schedule_interval='@daily', # Atualizado para a sintaxe clássica mais estável
     catchup=False
 ) as dag:
 
+    # --- TAREFA 0: SETUP DO BANCO (Novo) ---
+    def task_setup_db(**kwargs):
+        """Garante que a tabela exista com os tipos corretos antes de começar."""
+        create_tables()
+
+    setup_db_task = PythonOperator(
+        task_id='setup_database',
+        python_callable=task_setup_db
+    )
+
     # --- TAREFA 1: EXTRAÇÃO ---
     def task_extract(**kwargs):
-        """Busca dados brutos da API e os disponibiliza via XCom."""
         dados_brutos = extrair_dados("products")
         if not dados_brutos:
             raise Exception("Falha crítica: Não foi possível extrair dados da API.")
@@ -45,15 +54,13 @@ with DAG(
 
     # --- TAREFA 2: TRANSFORMAÇÃO ---
     def task_transform(**kwargs):
-        """Recupera dados da extração e aplica a lógica da Camada Silver."""
         ti = kwargs['ti']
         dados_brutos = ti.xcom_pull(task_ids='extract_from_api')
         
         df_silver = transform_products(dados_brutos)
-        if df_silver is None:
+        if df_silver is None or df_silver.empty:
             raise Exception("Falha crítica: A transformação resultou em um conjunto vazio.")
             
-        # Converte para dicionário para ser serializável pelo XCom
         return df_silver.to_dict(orient='records')
 
     transform_task = PythonOperator(
@@ -63,23 +70,31 @@ with DAG(
 
     # --- TAREFA 3: CARGA ---
     def task_load(**kwargs):
-        """Recupera dados transformados e carrega no PostgreSQL do Render."""
         ti = kwargs['ti']
         dados_limpos = ti.xcom_pull(task_ids='transform_with_pandas')
         
         df_final = pd.DataFrame(dados_limpos)
         engine = get_engine()
         
-        if engine:
-            df_final.to_sql('silver_products', con=engine, if_exists='replace', index=False)
-            print("✅ Sucesso: Dados persistidos na tabela 'silver_products' no Render.")
-        else:
+        if not engine:
             raise Exception("Falha crítica: Não foi possível conectar ao banco de dados.")
+
+        try:
+            with engine.connect() as conn:
+                # Limpa dados antigos da tabela mantendo a estrutura que o Paco queria
+                conn.execute(text("TRUNCATE TABLE silver_products;"))
+                conn.commit()
+            
+            # Insere os novos dados (append) respeitando o DDL original
+            df_final.to_sql('silver_products', con=engine, if_exists='append', index=False)
+            print("✅ Sucesso: Dados persistidos na tabela 'silver_products' no Render.")
+        except Exception as e:
+            raise Exception(f"Erro crítico durante a carga no banco: {e}")
 
     load_task = PythonOperator(
         task_id='load_to_render',
         python_callable=task_load
     )
 
-    # --- 3. DEFINIÇÃO DO FLUXO (DEPENDÊNCIAS) ---
-    extract_task >> transform_task >> load_task
+    # --- DEFINIÇÃO DO FLUXO (DEPENDÊNCIAS) ---
+    setup_db_task >> extract_task >> transform_task >> load_task
