@@ -1,85 +1,78 @@
-# 🛒 Global Store Data Pipeline (ETL)
+# 🛒 Global Store ETL Pipeline
 
-Pipeline de dados automatizado (End-to-End) para extração, transformação e carga de produtos de e-commerce. Desenvolvido para processar dados da FakeStoreAPI e popular um Data Warehouse na nuvem utilizando a **Arquitetura de Medalhão**.
+Este projeto consiste em um **pipeline de dados automatizado** que extrai informações de produtos da **FakeStoreAPI**, realiza transformações de limpeza e padronização utilizando **Pandas**, e persiste os dados em um **Data Warehouse PostgreSQL hospedado no Render**.
+
+O pipeline é orquestrado pelo **Apache Airflow**, garantindo **idempotência** e **observabilidade** do processo.
 
 ---
 
-## 🚀 Tecnologias e Ferramentas
+## 🚀 Tecnologias Utilizadas
 
 * **Linguagem:** Python 3.12
-* **Manipulação e Tratamento:** Pandas
-* **Banco de Dados Cloud:** PostgreSQL (Render)
-* **Conexão / ORM:** SQLAlchemy
-* **Orquestração de Dados:** Apache Airflow
-* **Gestão de Dependências:** Poetry
+* **Orquestração:** Apache Airflow 2.11+
+* **Transformação:** Pandas
+* **Banco de Dados:** PostgreSQL (Render)
+* **Conexão e Carga:** SQLAlchemy Core 1.4 (Bulk Insert)
+* **Gerenciador de Dependências:** Poetry
 
 ---
 
-## 🏗️ Arquitetura do Projeto
+## 📂 Estrutura do Projeto
 
-O pipeline foi modularizado em etapas claras para seguir as melhores práticas de Engenharia de Dados:
-
-1. **Setup de Infraestrutura (`init_db.py`)**
-   Garante a criação explícita da tabela `silver_products` no PostgreSQL com as tipagens corretas (DDL) antes de qualquer carga de dados.
-
-2. **Camada Bronze (Extração - `api_client.py`)**
-   Consumo de dados via API REST com adição automática de `extraction_timestamp` (auditoria) e tratamento de falhas de rede (timeouts).
-
-3. **Camada Silver (Transformação - `transform.py`)**
-   Limpeza de dados e *flattening* (achatamento) dinâmico de estruturas JSON aninhadas (`rating`) utilizando a alta performance do Pandas.
-
-4. **Carga (`db_manager.py`)**
-   Persistência dos dados estruturados no Data Warehouse utilizando práticas seguras de conexão via variáveis de ambiente.
-
-5. **Orquestração (`dags/global_store_dag.py`)**
-   Fluxo estruturado em uma DAG do Airflow, com isolamento de tarefas (**Setup → Extract → Transform → Load**) e comunicação de metadados via XCom.
-
----
-
-## ⚙️ Como Executar Localmente (Standalone)
-
-Para testar o fluxo de extração e carga no banco de dados localmente (sem a necessidade de subir os containers do Airflow), você pode utilizar o orquestrador embutido `main.py`.
-
-### 📋 Pré-requisitos
-
-* Python 3.12+
-* Poetry instalado:
-
-```bash
-pip install poetry
+```
+global_store_pipeline/
+├── dags/
+│   └── global_store_dag.py     # Definição do fluxo de tarefas no Airflow
+├── src/                        # Módulos de lógica do pipeline
+│   ├── api_client.py           # Extração (Camada Bronze)
+│   ├── transform.py            # Transformação (Camada Silver)
+│   ├── db_manager.py           # Gerenciamento de conexão com banco
+│   └── init_db.py              # DDL e inicialização de tabelas
+├── main.py                     # Execução manual (Local)
+├── pyproject.toml              # Dependências Poetry
+└── .env                        # Variáveis de ambiente (não versionado)
 ```
 
 ---
 
-### ▶️ Passo a Passo
+## 🛠️ Configuração do Ambiente
 
-#### **1. Clone o repositório**
+### 1️⃣ Pré-requisitos
 
-```bash
-git clone https://github.com/samuelZ20/global_store_pipeline.git
-cd global_store_pipeline
-```
+Certifique-se de ter:
 
-#### **2. Instale as dependências com o Poetry**
+* **Python 3.12**
+* **Poetry**
+* Ambiente Linux/WSL (recomendado para compatibilidade com o Airflow)
+
+---
+
+### 2️⃣ Instalação de Dependências
 
 ```bash
 poetry install
 ```
 
-#### **3. Configure as Variáveis de Ambiente**
+---
 
-Crie um arquivo chamado `.env` na raiz do projeto e adicione as credenciais do seu banco PostgreSQL no Render:
+### 3️⃣ Variáveis de Ambiente
+
+Crie um arquivo `.env` na raiz do projeto com as credenciais do banco de dados no Render:
 
 ```env
 DB_USER=seu_usuario
 DB_PASSWORD=sua_senha
-DB_HOST=seu_host.render.com
-DB_NAME=seu_banco
+DB_HOST=seu_host_no_render.com
+DB_NAME=global_store_dw
 ```
 
-#### **4. Execute o Pipeline Completo**
+---
 
-O comando abaixo validará o banco de dados (criando a tabela se necessário) e fará o ciclo completo de ETL:
+## 🏃 Como Rodar
+
+### 🔹 Modo Local (Script Rápido)
+
+Para validar a conexão e a lógica ETL sem a interface do Airflow:
 
 ```bash
 poetry run python main.py
@@ -87,23 +80,68 @@ poetry run python main.py
 
 ---
 
-## 🌬️ Execução via Apache Airflow
+### 🔹 Modo Orquestrado (Airflow Standalone)
 
-A lógica de orquestração distribuída encontra-se no diretório:
+Para rodar com **agendamento e monitoramento visual**:
+
+#### 1. Configuração de Caminhos
+
+No terminal, informe ao Python a localização dos módulos:
+
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+```
+
+#### 2. Inicie o Airflow
+
+```bash
+poetry run airflow standalone
+```
+
+#### 3. Acesso
+
+Abra o navegador em:
 
 ```
-dags/global_store_dag.py
+http://localhost:8080
 ```
 
-A DAG foi construída utilizando `PythonOperator` e está pronta para ser:
-
-* Acoplada a qualquer ambiente Airflow
-* Agendada (`@daily`)
-* Executada em ambientes containerizados (Docker, Astro CLI, etc.)
+Localize a DAG **`global_store_multi_task_pipeline`** e ative-a.
 
 ---
 
-## 👨‍💻 Autor
+## 🧠 Decisões Técnicas de Engenharia
+
+### ✅ Idempotência
+
+O processo de carga utiliza `TRUNCATE` dentro de uma transação `engine.begin()`, garantindo que o pipeline possa ser reexecutado sem:
+
+* duplicar dados
+* deixar o banco em estado inconsistente
+
+---
+
+### ✅ Carga Robusta
+
+Devido a incompatibilidades entre **Pandas** e **SQLAlchemy** em ambientes virtuais específicos, a carga final é realizada via **SQLAlchemy Core (Bulk Insert)**, contornando o erro:
+
+```
+AttributeError: Engine object has no attribute cursor
+```
+
+---
+
+### ✅ Modularidade
+
+A lógica é separada em camadas:
+
+* **Bronze:** Extração da API
+* **Silver:** Limpeza e padronização dos dados
+
+Essa arquitetura facilita manutenção, testes e expansão futura para novas fontes de dados.
+
+---
+
+## 🎓 Autor
 
 **Samuel Frizzone Cardoso**
-Engenharia de Dados — UFLA
