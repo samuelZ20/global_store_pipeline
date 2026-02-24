@@ -1,53 +1,60 @@
 # 🛒 Global Store ETL Pipeline
 
-Este projeto consiste em um **pipeline de dados automatizado** que extrai informações de produtos da **FakeStoreAPI**, realiza transformações de limpeza e padronização utilizando **Pandas**, e persiste os dados em um **Data Warehouse PostgreSQL hospedado no Render**.
-
-O pipeline é orquestrado pelo **Apache Airflow**, garantindo **idempotência** e **observabilidade** do processo.
+Este projeto é um **pipeline de dados automatizado** que extrai informações de produtos da **FakeStoreAPI**, processa os dados com **Pandas** e os armazena em um **Data Warehouse PostgreSQL (Render)**.
+A orquestração é realizada via **Apache Airflow**, garantindo monitoramento e reexecução segura (**idempotência**).
 
 ---
 
-## 🚀 Tecnologias Utilizadas
+## 👤 Autor
+
+**Samuel Frizzone Cardoso**
+
+---
+
+## 🚀 Tecnologias
 
 * **Linguagem:** Python 3.12
 * **Orquestração:** Apache Airflow 2.11+
 * **Transformação:** Pandas
 * **Banco de Dados:** PostgreSQL (Render)
-* **Conexão e Carga:** SQLAlchemy Core 1.4 (Bulk Insert)
 * **Gerenciador de Dependências:** Poetry
 
 ---
 
 ## 📂 Estrutura do Projeto
 
-```
+```plaintext
 global_store_pipeline/
 ├── dags/
-│   └── global_store_dag.py     # Definição do fluxo de tarefas no Airflow
-├── src/                        # Módulos de lógica do pipeline
-│   ├── api_client.py           # Extração (Camada Bronze)
-│   ├── transform.py            # Transformação (Camada Silver)
-│   ├── db_manager.py           # Gerenciamento de conexão com banco
-│   └── init_db.py              # DDL e inicialização de tabelas
-├── main.py                     # Execução manual (Local)
-├── pyproject.toml              # Dependências Poetry
-└── .env                        # Variáveis de ambiente (não versionado)
+│   └── global_store_dag.py     # Orquestração do fluxo de tarefas
+├── src/                        # Núcleo da lógica (Modules)
+│   ├── api_client.py           # Extração (Bronze)
+│   ├── transform.py            # Transformação (Silver)
+│   ├── db_manager.py           # Conexão com o Banco
+│   └── init_db.py              # DDL e Inicialização
+├── main.py                     # Execução Manual/Debug
+├── pyproject.toml              # Configurações do Poetry
+└── .env                        # Variáveis Sensíveis (Não versionado)
 ```
 
 ---
 
-## 🛠️ Configuração do Ambiente
+## 🛠️ Configuração e Instalação
 
-### 1️⃣ Pré-requisitos
+### 1️⃣ Clonar o Repositório
 
-Certifique-se de ter:
+Abra o seu terminal (preferencialmente WSL/Ubuntu) e baixe o projeto:
 
-* **Python 3.12**
-* **Poetry**
-* Ambiente Linux/WSL (recomendado para compatibilidade com o Airflow)
+```bash
+git clone https://github.com/samuelZ20/global_store_pipeline.git
+cd global_store_pipeline
+```
 
 ---
 
-### 2️⃣ Instalação de Dependências
+### 2️⃣ Instalar Dependências
+
+Utilize o Poetry para criar o ambiente virtual e instalar as bibliotecas:
 
 ```bash
 poetry install
@@ -55,9 +62,9 @@ poetry install
 
 ---
 
-### 3️⃣ Variáveis de Ambiente
+### 3️⃣ Configurar Variáveis de Ambiente
 
-Crie um arquivo `.env` na raiz do projeto com as credenciais do banco de dados no Render:
+Crie um arquivo `.env` na raiz do projeto com as credenciais do seu banco no Render:
 
 ```env
 DB_USER=seu_usuario
@@ -68,11 +75,11 @@ DB_NAME=global_store_dw
 
 ---
 
-## 🏃 Como Rodar
+## 🏃 Como Executar
 
-### 🔹 Modo Local (Script Rápido)
+### 🔹 Modo Local (Teste Rápido)
 
-Para validar a conexão e a lógica ETL sem a interface do Airflow:
+Valida a lógica ETL e a persistência no banco **sem a interface do Airflow**:
 
 ```bash
 poetry run python main.py
@@ -84,15 +91,17 @@ poetry run python main.py
 
 Para rodar com **agendamento e monitoramento visual**:
 
-#### 1. Configuração de Caminhos
+#### 1. Vincular DAGs e Módulos
 
-No terminal, informe ao Python a localização dos módulos:
+Configure o Airflow para reconhecer a pasta do projeto:
 
 ```bash
+mkdir -p ~/airflow/dags
+ln -s $(pwd)/dags/* ~/airflow/dags/
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 ```
 
-#### 2. Inicie o Airflow
+#### 2. Iniciar Airflow
 
 ```bash
 poetry run airflow standalone
@@ -100,48 +109,33 @@ poetry run airflow standalone
 
 #### 3. Acesso
 
-Abra o navegador em:
+Abra no navegador:
 
 ```
 http://localhost:8080
 ```
 
-Localize a DAG **`global_store_multi_task_pipeline`** e ative-a.
+Faça login com as credenciais geradas no terminal e ative a DAG **global_store_multi_task_pipeline**.
 
 ---
 
-## 🧠 Decisões Técnicas de Engenharia
-
-### ✅ Idempotência
-
-O processo de carga utiliza `TRUNCATE` dentro de uma transação `engine.begin()`, garantindo que o pipeline possa ser reexecutado sem:
-
-* duplicar dados
-* deixar o banco em estado inconsistente
-
----
+## 🧠 Decisões Técnicas
 
 ### ✅ Carga Robusta
 
-Devido a incompatibilidades entre **Pandas** e **SQLAlchemy** em ambientes virtuais específicos, a carga final é realizada via **SQLAlchemy Core (Bulk Insert)**, contornando o erro:
+A persistência utiliza **SQLAlchemy Core (Bulk Insert)** para evitar incompatibilidades de drivers entre o Pandas e o ambiente local.
 
-```
-AttributeError: Engine object has no attribute cursor
-```
+### ✅ Idempotência
 
----
-
-### ✅ Modularidade
-
-A lógica é separada em camadas:
-
-* **Bronze:** Extração da API
-* **Silver:** Limpeza e padronização dos dados
-
-Essa arquitetura facilita manutenção, testes e expansão futura para novas fontes de dados.
+O uso de `TRUNCATE` em transações atômicas (`engine.begin()`) garante que falhas no meio do processo não deixem dados duplicados ou inconsistentes no Data Warehouse.
 
 ---
 
-## 🎓 Autor
+## ✅ Objetivo
 
-**Samuel Frizzone Cardoso**
+Demonstrar a construção de um pipeline ETL moderno com:
+
+* Orquestração profissional
+* Separação em camadas (Bronze → Silver)
+* Integração com Data Warehouse na nuvem
+* Boas práticas de engenharia de dados
