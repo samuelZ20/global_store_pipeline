@@ -11,66 +11,56 @@ load_dotenv()
 
 def get_engine() -> Optional[Engine]:
     """
-    Cria a conexão com o banco de dados no Render usando URL segura.
-    Retorna a engine do SQLAlchemy ou None em caso de falha.
+    Gerencia a conexão com o banco no Render com foco em resiliência.
+    Utiliza pooling para evitar quedas de conexão em ambientes Cloud.
     """
     user = os.getenv("DB_USER")
     password = os.getenv("DB_PASSWORD")
     host = os.getenv("DB_HOST")
     db_name = os.getenv("DB_NAME")
+    port = os.getenv("DB_PORT", "5432") # Padrão do Render é 5432
     
-    # Validação Fail-Fast: Verifica se esqueceu alguma variável no .env
     if not all([user, password, host, db_name]):
-        print("❌ Erro: Faltam variáveis de ambiente no .env para o banco de dados.")
+        print("❌ Erro: Variáveis de ambiente incompletas no .env.")
         return None
     
-    # Construção segura da URL (Trata senhas com caracteres especiais como @, /, #)
     connection_url = URL.create(
         drivername="postgresql",
         username=user,
         password=password,
         host=host,
+        port=port,
         database=db_name
     )
     
     try:
-        engine = create_engine(connection_url)
-        # Tenta uma conexão simples para validar
-        with engine.connect() as conn:
-            print("✅ Conexão com o Render estabelecida com sucesso!")
+        engine = create_engine(
+            connection_url, 
+            pool_pre_ping=True, 
+            pool_recycle=3600
+        )
+        
+        # Teste de conectividade rápido usando transação automática (begin)
+        # Compatível com SQLAlchemy 1.4 (Sem erro de .commit())
+        with engine.begin() as conn:
+            conn.execute(text("SELECT 1"))
+            print("✅ Conexão com o Render estabelecida e validada!")
+            
         return engine
     except SQLAlchemyError as e:
-        print(f"❌ Erro ao conectar ao banco de dados: {e}")
+        print(f"❌ Falha crítica de conectividade: {e}")
         return None
 
-def create_tables(engine: Engine) -> None:
-    """Cria a tabela silver_products explicitamente se ela não existir."""
+def execute_ddl(engine: Engine, query: str) -> None:
+    """Executa comandos de estrutura (DDL) com gestão de transação automática."""
     if not engine:
-        print("❌ Erro: Engine inválida fornecida para criação de tabelas.")
         return
 
-    query = """
-    CREATE TABLE IF NOT EXISTS silver_products (
-        id INT PRIMARY KEY,
-        title TEXT,
-        price FLOAT,
-        category TEXT,
-        image TEXT,
-        rating_rate FLOAT,
-        rating_count INT,
-        extraction_timestamp TIMESTAMP
-    );
-    """
     try:
-        with engine.connect() as conn:
+        # O uso de engine.begin() garante o commit automático no SQLAlchemy 1.4
+        with engine.begin() as conn:
             conn.execute(text(query))
-            conn.commit()
-            print("✅ Sucesso: Estrutura da tabela validada no banco de dados!")
+        print("✅ Comando SQL executado com sucesso!")
     except SQLAlchemyError as e:
-        print(f"❌ Erro ao criar/validar tabela: {e}")
-
-if __name__ == "__main__":
-    # Teste de execução direta
-    test_engine = get_engine()
-    if test_engine:
-        create_tables(test_engine)
+        print(f"❌ Erro na execução SQL: {e}")
+        raise e # Re-lança para o Airflow capturar a falha

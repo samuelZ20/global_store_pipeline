@@ -1,26 +1,18 @@
-[project]
+[tool.poetry]
 name = "global-store-pipeline"
 version = "0.1.0"
-description = "Pipeline de dados E-commerce Global"
-authors = [
-    {name = "samuelZ20", email = "frizzonecardoso@gmail.com"}
-]
-readme = "README.md"
-# Mudamos aqui para aceitar o Airflow
-requires-python = ">=3.10,<3.13"
-
-[tool.poetry]
-# Define que nosso código principal mora na pasta src
-packages = [{include = "src"}]
+description = "Pipeline ETL para Global Store"
+authors = ["Samuel Frizzone Cardoso <frizzonecardoso@gmail.com>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
 pandas = "^2.0.0"
-sqlalchemy = "^2.0.0"
+sqlalchemy = "~1.4.36"
 psycopg2-binary = "^2.9.0"
 python-dotenv = "^1.0.0"
-apache-airflow = "^2.7.0"
+apache-airflow = "^2.9.0"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

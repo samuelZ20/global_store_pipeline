@@ -1,18 +1,22 @@
 from airflow import DAG
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
 import sys
 import os
 import pandas as pd
 from sqlalchemy import text
 
-# Garante que o Airflow encontre a pasta 'src' para importar seus módulos locais
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+# Definimos o caminho absoluto para que o Airflow encontre a pasta 'src'
+PROJECT_PATH = "/mnt/c/Users/samue/OneDrive/Documentos/global_store_pipeline"
+SRC_PATH = os.path.join(PROJECT_PATH, 'src')
+
+if SRC_PATH not in sys.path:
+    sys.path.append(SRC_PATH)
 
 from api_client import extrair_dados
 from transform import transform_products
 from db_manager import get_engine
-from init_db import create_tables # <-- Novo import!
+from init_db import create_tables
 
 default_args = {
     'owner': 'Samuel Frizzone',
@@ -26,13 +30,13 @@ with DAG(
     'global_store_multi_task_pipeline',
     default_args=default_args,
     description='Pipeline ETL Modular para a Global Store',
-    schedule_interval='@daily', # Atualizado para a sintaxe clássica mais estável
+    schedule_interval='@daily',
     catchup=False
 ) as dag:
 
-    # --- TAREFA 0: SETUP DO BANCO (Novo) ---
+    # --- TAREFA 0: SETUP DO BANCO ---
     def task_setup_db(**kwargs):
-        """Garante que a tabela exista com os tipos corretos antes de começar."""
+        """Garante que a tabela exista antes de começar."""
         create_tables()
 
     setup_db_task = PythonOperator(
@@ -44,7 +48,7 @@ with DAG(
     def task_extract(**kwargs):
         dados_brutos = extrair_dados("products")
         if not dados_brutos:
-            raise Exception("Falha crítica: Não foi possível extrair dados da API.")
+            raise Exception("Falha crítica: Extração retornou vazio.")
         return dados_brutos
 
     extract_task = PythonOperator(
@@ -59,7 +63,7 @@ with DAG(
         
         df_silver = transform_products(dados_brutos)
         if df_silver is None or df_silver.empty:
-            raise Exception("Falha crítica: A transformação resultou em um conjunto vazio.")
+            raise Exception("Falha crítica: Transformação resultou em vazio.")
             
         return df_silver.to_dict(orient='records')
 
@@ -68,33 +72,52 @@ with DAG(
         python_callable=task_transform
     )
 
-    # --- TAREFA 3: CARGA ---
+    # --- TAREFA 3: LOAD
     def task_load(**kwargs):
         ti = kwargs['ti']
+        # Puxa os dados serializados do XCom
         dados_limpos = ti.xcom_pull(task_ids='transform_with_pandas')
         
+        if not dados_limpos:
+            raise Exception("❌ Falha: Não há dados no XCom para carregar.")
+
         df_final = pd.DataFrame(dados_limpos)
         engine = get_engine()
         
         if not engine:
-            raise Exception("Falha crítica: Não foi possível conectar ao banco de dados.")
+            raise Exception("❌ Falha crítica: Não foi possível obter o motor de conexão.")
 
         try:
-            with engine.connect() as conn:
-                # Limpa dados antigos da tabela mantendo a estrutura que o Paco queria
+            # Preparamos os dados para o SQLAlchemy Core
+            registros = df_final.to_dict(orient='records')
+
+            # 'engine.begin()' garante que o TRUNCATE e o INSERT sejam uma única transação
+            with engine.begin() as conn:
+                # 1. Limpeza para garantir idempotência
                 conn.execute(text("TRUNCATE TABLE silver_products;"))
-                conn.commit()
+                
+                # 2. Inserção em lote (Bulk Insert)
+                insert_query = text("""
+                    INSERT INTO silver_products (
+                        id, title, price, category, image, 
+                        rating_rate, rating_count, extraction_timestamp
+                    )
+                    VALUES (
+                        :id, :title, :price, :category, :image, 
+                        :rating_rate, :rating_count, :extraction_timestamp
+                    )
+                """)
+                conn.execute(insert_query, registros)
+                
+            print(f"✅ Sucesso Sênior: {len(df_final)} produtos persistidos no Render!")
             
-            # Insere os novos dados (append) respeitando o DDL original
-            df_final.to_sql('silver_products', con=engine, if_exists='append', index=False)
-            print("✅ Sucesso: Dados persistidos na tabela 'silver_products' no Render.")
         except Exception as e:
-            raise Exception(f"Erro crítico durante a carga no banco: {e}")
+            raise Exception(f"Erro crítico durante a carga via SQLAlchemy Core: {e}")
 
     load_task = PythonOperator(
         task_id='load_to_render',
         python_callable=task_load
     )
 
-    # --- DEFINIÇÃO DO FLUXO (DEPENDÊNCIAS) ---
+    # --- DEPENDÊNCIAS ---
     setup_db_task >> extract_task >> transform_task >> load_task

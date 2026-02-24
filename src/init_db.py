@@ -1,15 +1,17 @@
-from src.db_manager import get_engine
 from sqlalchemy import text
+from src.db_manager import get_engine
 
 def create_tables():
+    """Garante a infraestrutura necessária no banco de dados antes da carga."""
     engine = get_engine()
     
     if not engine:
-        print("❌ Erro: Não foi possível conectar ao banco de dados no Render.")
+        print("❌ Erro de Conexão: O motor (engine) não foi inicializado.")
         return
 
-    # Comando DDL (SQL) para criar a tabela se ela não existir
-    query = """
+    # Usamos SERIAL para o ID se quisermos que o Postgres gerencie a contagem automática, 
+    # ou INTEGER se o ID vier fixo da FakeStoreAPI.
+    ddl_query = """
     CREATE TABLE IF NOT EXISTS silver_products (
         id INTEGER PRIMARY KEY,
         title VARCHAR(255),
@@ -18,18 +20,24 @@ def create_tables():
         image TEXT,
         rating_rate FLOAT,
         rating_count INTEGER,
-        extraction_timestamp TIMESTAMP
+        extraction_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
     
     try:
-        with engine.connect() as conn:
-            conn.execute(text(query))
-            conn.commit()
-            print("✅ Sucesso: Tabela 'silver_products' verificada/criada no banco de dados!")
+        # 'begin()' abre uma transação. Se a query falhar, ele faz o rollback. 
+        # Se funcionar, faz o commit automático ao final do bloco 'with'.
+        # Perfeito para SQLAlchemy 1.4 usado no Airflow.
+        with engine.begin() as conn:
+            conn.execute(text(ddl_query))
+        
+        print("✅ Infraestrutura: Tabela 'silver_products' verificada/criada com sucesso!")
+        
     except Exception as e:
-        print(f"❌ Erro ao criar a tabela: {e}")
+        # Em ambiente sênior, logamos o erro específico para facilitar o debug
+        print(f"❌ Falha ao configurar DDL: {e}")
+        raise e # Re-lançamos o erro para que o Airflow saiba que a tarefa falhou
 
 if __name__ == "__main__":
-    print("⏳ Iniciando a configuração do banco de dados...")
+    print("⏳ Iniciando configuração de ambiente de banco de dados...")
     create_tables()
