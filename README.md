@@ -1,7 +1,6 @@
-# 🛒 Global Store ETL Pipeline
+# Global Store ETL Pipeline
 
-Este projeto é um **pipeline de dados automatizado** que extrai informações de produtos da **FakeStoreAPI**, processa os dados com **Pandas** e os armazena em um **Data Warehouse PostgreSQL (Render)**.
-A orquestração é realizada via **Apache Airflow**, garantindo monitoramento e reexecução segura (**idempotência**).
+Pipeline de dados automatizado que extrai produtos da **FakeStoreAPI**, transforma com **Pandas** e armazena em um **Data Warehouse PostgreSQL (Render)**. Orquestrado via **Apache Airflow** com uma DAG por camada.
 
 ---
 
@@ -13,11 +12,47 @@ A orquestração é realizada via **Apache Airflow**, garantindo monitoramento e
 
 ## 🚀 Tecnologias
 
-* **Linguagem:** Python 3.12
-* **Orquestração:** Apache Airflow 2.11+
-* **Transformação:** Pandas
-* **Banco de Dados:** PostgreSQL (Render)
-* **Gerenciador de Dependências:** Poetry
+| Tech | Versão |
+|---|---|
+| Python | 3.12 |
+| Apache Airflow | 2.9+ |
+| Pandas | 2.0+ |
+| SQLAlchemy | 1.4 |
+| PostgreSQL | Render Cloud |
+| Poetry | Gerenciador de deps |
+
+---
+
+## 🏗️ Arquitetura
+
+```mermaid
+flowchart TD
+    A([FakeStoreAPI]) -->|GET /products| B
+
+    subgraph Airflow ["Apache Airflow — Orquestração"]
+        direction TB
+
+        DAG0[dag_setup_db\n@once]:::infra
+        DAG1[dag_check_connection\n@hourly]:::infra
+        DAG2[dag_bronze_extract\n@daily]:::bronze
+        DAG3[dag_silver_transform\n@daily]:::silver
+        DAG4[dag_load_validate\n@daily]:::load
+
+        DAG0 -.->|pré-requisito| DAG2
+        DAG1 -.->|monitoramento| DAG2
+    end
+
+    B[dag_bronze_extract] --> C[(bronze_products\nJSON bruto)]
+    C --> D[dag_silver_transform]
+    D --> E[(silver_products\nDados limpos)]
+    E --> F[dag_load_validate]
+    F --> G([BI / APIs Externas])
+
+    classDef infra fill:#6c757d,color:#fff,stroke:none
+    classDef bronze fill:#cd7f32,color:#fff,stroke:none
+    classDef silver fill:#aaa,color:#fff,stroke:none
+    classDef load fill:#198754,color:#fff,stroke:none
+```
 
 ---
 
@@ -26,116 +61,96 @@ A orquestração é realizada via **Apache Airflow**, garantindo monitoramento e
 ```plaintext
 global_store_pipeline/
 ├── dags/
-│   └── global_store_dag.py     # Orquestração do fluxo de tarefas
-├── src/                        # Núcleo da lógica (Modules)
-│   ├── api_client.py           # Extração (Bronze)
-│   ├── transform.py            # Transformação (Silver)
-│   ├── db_manager.py           # Conexão com o Banco
-│   └── init_db.py              # DDL e Inicialização
-├── main.py                     # Execução Manual/Debug
-├── pyproject.toml              # Configurações do Poetry
-└── .env                        # Variáveis Sensíveis (Não versionado)
+│   ├── dag_setup_db.py          # [INFRA] Cria as tabelas (rodar primeiro, @once)
+│   ├── dag_check_connection.py  # [INFRA] Verifica conectividade (@hourly)
+│   ├── dag_bronze_extract.py    # [ETL]   API → bronze_products (@daily)
+│   ├── dag_silver_transform.py  # [ETL]   bronze → silver_products (@daily)
+│   └── dag_load.py              # [ETL]   Validação e exposição final (@daily)
+├── src/
+│   ├── api_client.py            # Extração da FakeStoreAPI
+│   ├── transform.py             # Transformações Pandas (flattening, tipagem)
+│   ├── db_manager.py            # Engine SQLAlchemy + conectividade
+│   ├── init_db.py               # DDL das tabelas Bronze e Silver
+│   └── utils.py                 # Helper genérico de persistência
+├── bootstrap.sh                 # Setup do ambiente local
+├── pyproject.toml
+└── .env                         # Credenciais (não versionado)
 ```
 
 ---
 
-## 🛠️ Configuração e Instalação
+## 🛠️ Instalação
 
-### 1️⃣ Clonar o Repositório
-
-Abra o seu terminal (preferencialmente WSL/Ubuntu) e baixe o projeto:
+### 1. Clonar o repositório
 
 ```bash
 git clone https://github.com/samuelZ20/global_store_pipeline.git
 cd global_store_pipeline
 ```
 
----
-
-### 2️⃣ Instalar Dependências
-
-Utilize o Poetry para criar o ambiente virtual e instalar as bibliotecas:
+### 2. Instalar dependências
 
 ```bash
 poetry install
 ```
 
----
-
-### 3️⃣ Configurar Variáveis de Ambiente
-
-Crie um arquivo `.env` na raiz do projeto com as credenciais do seu banco no Render:
+### 3. Configurar o `.env`
 
 ```env
 DB_USER=seu_usuario
 DB_PASSWORD=sua_senha
-DB_HOST=seu_host_no_render.com
-DB_NAME=global_store_dw
+DB_HOST=seu_host.oregon-postgres.render.com
+DB_NAME=nome_do_banco
+DB_PORT=5432
 ```
 
 ---
 
 ## 🏃 Como Executar
 
-### 🔹 Modo Local (Teste Rápido)
-
-Valida a lógica ETL e a persistência no banco **sem a interface do Airflow**:
+### 1. Bootstrap do ambiente
 
 ```bash
-poetry run python main.py
+source bootstrap.sh
 ```
 
----
+O script configura o `PYTHONPATH`, cria os symlinks das DAGs em `~/airflow/dags` e carrega o `.env` automaticamente.
 
-### 🔹 Modo Orquestrado (Airflow Standalone)
-
-Para rodar com **agendamento e monitoramento visual**:
-
-#### 1. Vincular DAGs e Módulos
-
-Configure o Airflow para reconhecer a pasta do projeto:
-
-```bash
-mkdir -p ~/airflow/dags
-ln -s $(pwd)/dags/* ~/airflow/dags/
-export PYTHONPATH=$PYTHONPATH:$(pwd)
-```
-
-#### 2. Iniciar Airflow
+### 2. Iniciar o Airflow
 
 ```bash
 poetry run airflow standalone
 ```
 
-#### 3. Acesso
+Acesse `http://localhost:8080` com as credenciais exibidas no terminal (também salvas em `~/airflow/standalone_admin_password.txt`).
 
-Abra no navegador:
+### 3. Ordem de execução das DAGs
 
-```
-http://localhost:8080
-```
-
-Faça login com as credenciais geradas no terminal e ative a DAG **global_store_multi_task_pipeline**.
+| Ordem | DAG ID | Descrição |
+|:---:|---|---|
+| 1️⃣ | `setup_database` | Cria as tabelas — rodar **uma única vez** |
+| 2️⃣ | `check_connection` | Valida conectividade com o banco |
+| 3️⃣ | `bronze_extract` | Extrai produtos da FakeStoreAPI |
+| 4️⃣ | `silver_transform` | Transforma e limpa os dados |
+| 5️⃣ | `load_validate` | Valida e expõe os dados finais |
 
 ---
 
 ## 🧠 Decisões Técnicas
 
-### ✅ Carga Robusta
+### Uma DAG por Responsabilidade
 
-A persistência utiliza **SQLAlchemy Core (Bulk Insert)** para evitar incompatibilidades de drivers entre o Pandas e o ambiente local.
+Cada camada do pipeline é uma DAG independente, permitindo monitoramento, reexecução e extensão isolados. Os dados são **persistidos no banco entre as camadas** (sem XCom cross-DAG):
 
-### ✅ Idempotência
+| Tabela | Camada | Conteúdo |
+|---|---|---|
+| `bronze_products` | Bronze | Dados brutos da API (`rating` como JSONB) |
+| `silver_products` | Silver | Dados transformados e tipados |
 
-O uso de `TRUNCATE` em transações atômicas (`engine.begin()`) garante que falhas no meio do processo não deixem dados duplicados ou inconsistentes no Data Warehouse.
+### Carga Robusta
 
----
+Usa **SQLAlchemy Core (Bulk Insert)** via `save_dataframe_to_table()` em `utils.py`, evitando incompatibilidades entre Pandas `to_sql` e drivers PostgreSQL.
 
-## ✅ Objetivo
+### Idempotência
 
-Demonstrar a construção de um pipeline ETL moderno com:
-
-* Orquestração profissional
-* Separação em camadas (Bronze → Silver)
-* Integração com Data Warehouse na nuvem
-* Boas práticas de engenharia de dados
+`TRUNCATE` em transação atômica (`engine.begin()`) garante que reexecuções não geram dados duplicados. O setup usa `CREATE TABLE IF NOT EXISTS`.
