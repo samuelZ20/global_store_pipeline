@@ -27,26 +27,27 @@ Pipeline de dados automatizado que extrai produtos da **FakeStoreAPI**, transfor
 
 ```mermaid
 flowchart TD
-    A([FakeStoreAPI]) -->|GET /products| B
+    A([FakeStoreAPI]) -->|GET /products| BRONZE
 
-    subgraph Airflow ["Apache Airflow — Orquestração"]
-        direction TB
-
-        DAG0[dag_setup_db\n@once]:::infra
-        DAG1[dag_check_connection\n@hourly]:::infra
-        DAG2[dag_bronze_extract\n@daily]:::bronze
-        DAG3[dag_silver_transform\n@daily]:::silver
-        DAG4[dag_load_validate\n@daily]:::load
-
-        DAG0 -.->|pré-requisito| DAG2
-        DAG1 -.->|monitoramento| DAG2
+    subgraph INFRA ["Infraestrutura"]
+        SETUP["dag_setup_db — @once"]:::infra
+        CHECK["dag_check_connection — @hourly"]:::infra
     end
 
-    B[dag_bronze_extract] --> C[(bronze_products\nJSON bruto)]
-    C --> D[dag_silver_transform]
-    D --> E[(silver_products\nDados limpos)]
-    E --> F[dag_load_validate]
-    F --> G([BI / APIs Externas])
+    subgraph ETL ["Pipeline ETL"]
+        BRONZE["dag_bronze_extract — @daily"]:::bronze
+        SILVER["dag_silver_transform — @daily"]:::silver
+        LOAD["dag_load_validate — @daily"]:::load
+    end
+
+    SETUP -.->|cria tabelas| BRONZE
+    CHECK -.->|monitora conexao| BRONZE
+
+    BRONZE --> DB_B[(bronze_products)]
+    DB_B --> SILVER
+    SILVER --> DB_S[(silver_products)]
+    DB_S --> LOAD
+    LOAD --> G([BI / APIs Externas])
 
     classDef infra fill:#6c757d,color:#fff,stroke:none
     classDef bronze fill:#cd7f32,color:#fff,stroke:none
